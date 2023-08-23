@@ -21,5 +21,8 @@
   "bugs": {
     "url": "https://github.com/voidest1/bk_ccex/issues"
   },
-  "homepage": "https://github.com/voidest1/bk_ccex#readme"
+  "homepage": "https://github.com/voidest1/bk_ccex#readme",
+  "dependencies": {
+    "node-fetch": "2.6.13"
+  }
 }
