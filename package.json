@@ -1,0 +1,25 @@
+{
+  "name": "bk_ccex",
+  "version": "1.0.0",
+  "description": "Crypto Centralize Exchanges by BITKAN",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voidest1/bk_ccex.git"
+  },
+  "keywords": [
+    "crypto",
+    "cex",
+    "exchanges",
+    "bitkan"
+  ],
+  "author": "Leon Liu",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/voidest1/bk_ccex/issues"
+  },
+  "homepage": "https://github.com/voidest1/bk_ccex#readme"
+}
