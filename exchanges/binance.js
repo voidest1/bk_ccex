@@ -12,14 +12,14 @@ class Binance extends Basex{
      * @constructor
      * @param {object} option
      * @param {string} [option.httpHost="https://api.binance.com"] - host for REST API
-     * @param {string} [option.wssHost="wss://stream.binance.com:9443"] - host for WebSocket
+     * @param {string} [option.wssHost="wss://stream.binance.com:9443/ws"] - host for WebSocket
      * @param {object} [option.auth] - authentication
      * @param {string} option.auth.access - access id
      * @param {string} option.auth.secret - secret key
      * @inheritDoc
      */
     constructor(option={}) {
-        option = {...{httpHost:'https://api.binance.com', wssHost:'wss://stream.binance.com:9443'}, ...option};
+        option = {...{httpHost:'https://api.binance.com', wssHost:'wss://stream.binance.com:9443/stream'}, ...option};
         super(option);
     }
     async __refreshSymbols(){
@@ -40,6 +40,33 @@ class Binance extends Basex{
         depth.updateTime = Date.now();
         depth.depth.asks = result.data.asks;
         depth.depth.bids = result.data.bids;
+    }
+    async __onOpenWebSocket(ws){
+        if([5,10,20].indexOf(this.opt.depthLimit) === -1) return false;
+        const params = [];
+        for(const symbol in this.__depths){
+            const depth = this.__depths[symbol];
+            if(depth.refresh !== 'wss') continue;
+            const s = this.__symbols.symbols[symbol];
+            params.push(s.exSymbol.toLowerCase()+'@depth'+this.opt.depthLimit+'@100ms');
+        }
+        this.log(`Subscribe ${JSON.stringify(params)}`);
+        ws.send(JSON.stringify({method:'SUBSCRIBE', params, id:1}));
+        return true;
+    }
+    async __onMessageWebSocket(ws, message){
+        const data = JSON.parse(message.toString());
+        if(data.stream){
+            const stream = data.stream.split('@');
+            const s = this.__getSymbolByEx(stream[0].toUpperCase());
+            const depth = this.__depths[s.symbol];
+            depth.updateTime = Date.now();
+            depth.depth.asks = data.data.asks;
+            depth.depth.bids = data.data.bids;
+            if(this.__events['updateDepth']){
+                this.__events['updateDepth'](s.symbol, depth);
+            }
+        }
     }
     async #fetch(uri, query, auth = false){
         let queryString = auth?'timestamp='+Date.now():'';

@@ -23,6 +23,7 @@
   },
   "homepage": "https://github.com/voidest1/bk_ccex#readme",
   "dependencies": {
-    "node-fetch": "2.6.13"
+    "node-fetch": "2.6.13",
+    "ws": "^8.13.0"
   }
 }

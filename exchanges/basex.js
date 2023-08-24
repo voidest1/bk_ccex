@@ -1,4 +1,5 @@
 const fetch = require('node-fetch');
+const {WebSocket} = require('ws');
 global.debug = (process.argv.indexOf('-d') > -1);
 
 /**
@@ -13,14 +14,19 @@ class Basex{
      * @param {object} option
      * @param {string} option.httpHost
      * @param {string} option.wssHost
-     * @param {number} [option.depthLimit = 20] - limit of depth
+     * @param {number} [option.depthLimit = 5] - limit of depth
      */
     constructor(option) {
-        this.opt = {...{depthLimit:20},...option};
+        this.opt = {...{depthLimit:5},...option};
         this.name = this.constructor.name;
+        this.__enable = {depthWss:true};
         this.__symbols = {updateTime:0, symbols:{}};
         this.__depths = {};
+        this.__ws = null;
+        this.__events = {};
+        this.__syncing = false;
     }
+
     log(...args){
         if(!global.debug) return;
         console.log(...[...[`<${this.name}>`], ...args]);
@@ -58,11 +64,15 @@ class Basex{
             clearTimeout(timeout);
         }
     }
-
+    __getSymbolByEx(exSymbol){
+        for(const symbol in this.__symbols.symbols){
+            if(this.__symbols.symbols[symbol].exSymbol === exSymbol) return this.__symbols.symbols[symbol];
+        }
+    }
     /**
      * @abstract
      * @returns {Promise<void>}
-     * @private
+     * @protected
      */
     async __refreshSymbols(){throw 'No implement function'}
 
@@ -71,14 +81,41 @@ class Basex{
      * @param {string} baseAsset
      * @param {string} quoteAsset
      * @returns {Promise<void>}
-     * @private
+     * @protected
      */
     async __refreshDepth(baseAsset, quoteAsset){throw 'No implement function'}
+
+    /**
+     * @abstract
+     * @param {WebSocket} ws
+     * @returns {Promise<boolean>}
+     * @protected
+     */
+    async __onOpenWebSocket(ws){throw 'No implement function'}
+    /**
+     * @abstract
+     * @param {WebSocket} ws
+     * @param {Buffer} message
+     * @returns {Promise<void>}
+     * @protected
+     */
+    async __onMessageWebSocket(ws, message){throw 'No implement function'}
+
+    /**
+     * register an event on callback
+     * @param {("updateDepth")} event - event
+     * @param {function} func - callback function
+     * @public
+     */
+    on(event, func){
+        this.__events[event] = func;
+    }
     /**
      * get symbol or symbols of exchange
      * @param {string} [baseAsset] - BTC etc.
      * @param {string} [quoteAsset] - USDT etc.
      * @returns {Promise<object>}
+     * @public
      */
     async querySymbols(baseAsset, quoteAsset){
         if(Date.now() - this.__symbols.updateTime > Basex.CACHE_TIME){
@@ -101,6 +138,7 @@ class Basex{
      * @param {string} baseAsset - BTC etc.
      * @param {string} quoteAsset - USDT etc.
      * @returns {Promise<depth>}
+     * @public
      */
     async queryDepth(baseAsset, quoteAsset){
         baseAsset = baseAsset.toUpperCase();
@@ -113,6 +151,71 @@ class Basex{
             await this.__refreshDepth(baseAsset, quoteAsset);
         }
         return {updateTime:depth.updateTime, asks:depth.depth.asks, bids:depth.depth.bids};
+    }
+
+    /**
+     * start to sync depth by websocket
+     * @param {string} baseAsset
+     * @param {string} quoteAsset
+     * @returns {Promise<boolean>}
+     * @public
+     */
+    async syncDepth(baseAsset, quoteAsset){
+        if(!this.__enable.depthWss){
+            this.error(`Not support Depth on WebSocket`);
+            return false;
+        }
+        const s = await this.querySymbols(baseAsset, quoteAsset);
+        if(!s){
+            this.error(`Not support symbol ${baseAsset+'-'+quoteAsset}`);
+            return false;
+        }
+        if(!this.__depths[s.symbol]) this.__depths[s.symbol] = {refresh:'wss', updateTime:0, depth:{asks:[], bids:[]}};
+        this.__depths[s.symbol].refresh = 'wss';
+        if(!this.__ws){
+            const url = this.opt.wssHost;
+            const ws = new WebSocket(url);
+            this.__ws = ws;
+            this.__syncing = true;
+            this.log(`Connecting to ${url}...`);
+            let self = this;
+            ws.on('open', async ()=>{
+                self.log(`Connected to ${url}`);
+                if(!await self.__onOpenWebSocket(ws)){
+                    self.error(`Exception to open depth for ${s.symbol}`);
+                    ws.close();
+                }
+            });
+            ws.on('error', (err)=>{
+                self.error(`${self.name} WebSocket connection has error:${err.toString()}`);
+            });
+            ws.on('close', ()=>{
+                self.log(`Closed connection by ${self.__syncing?'peer':'manual'}`);
+                ws.removeAllListeners();
+                self.__ws = null;
+                if(self.__syncing) {
+                    setTimeout(() => {
+                        self.syncDepth(baseAsset, quoteAsset);
+                        self = null;
+                    }, 1000);
+                }
+            });
+            ws.on('message', async (message)=>{
+                await self.__onMessageWebSocket(ws, message);
+            });
+        }else{
+
+        }
+    }
+
+    /**
+     * stop sync of websocket
+     * @public
+     */
+    stopSync(){
+        this.log(`Stop websocket connection`);
+        this.__syncing = false;
+        this.__ws.close();
     }
 }
 module.exports = Basex;
