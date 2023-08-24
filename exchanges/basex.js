@@ -209,11 +209,11 @@ class Basex{
     }
 
     /**
-     * stop sync of websocket
+     * destroy by test, programmer don't need call it
      * @public
      */
-    stopSync(){
-        this.log(`Stop websocket connection`);
+    destroy(){
+        this.log(`Destroy`);
         this.__syncing = false;
         this.__ws.close();
     }

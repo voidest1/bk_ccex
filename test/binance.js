@@ -19,7 +19,7 @@ describe('TEST:Binance', function (){
         bn.on('updateDepth', (symbol, depth)=>{
             if(times++ > 1) return;
             assert.equal(symbol, 'BTC-USDT');
-            bn.stopSync();
+            bn.destroy();
             done();
         })
         bn.syncDepth('BTC', 'USDT');
