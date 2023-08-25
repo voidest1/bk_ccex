@@ -14,14 +14,18 @@ describe('TEST:Binance', function (){
         assert.equal(result.asks.length, 5);
         assert.equal(result.bids.length, 5);
     });
-    it('syncDepth', (done)=>{
-        let times = 1;
-        bn.on('updateDepth', (symbol, depth)=>{
-            if(times++ > 1) return;
-            assert.equal(symbol, 'BTC-USDT');
-            bn.destroy();
-            done();
+    it('subscribeDepth', (done)=>{
+        let symbols = {'BTC-USDT':0, 'ETH-USDT':0};
+        let duplicated = false;
+        bn.on('updateDepth', (symbol, data)=>{
+            symbols[symbol] = data.depth.asks.length;
+            if(symbols['BTC-USDT'] && symbols['ETH-USDT'] && !duplicated){
+                duplicated = true;
+                bn.destroy();
+                done();
+            }
         })
-        bn.syncDepth('BTC', 'USDT');
+        bn.subscribeDepth('BTC', 'USDT');
+        bn.subscribeDepth('ETH', 'USDT');
     });
 })
