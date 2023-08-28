@@ -21,6 +21,7 @@ class Binance extends Basex{
     constructor(option={}) {
         option = {...{httpHost:'https://api.binance.com', wssHost:'wss://stream.binance.com:9443/stream'}, ...option};
         super(option);
+        this.listenKey = {key:'', updateTime:0};
     }
     /**
      * @inheritDoc
@@ -50,13 +51,28 @@ class Binance extends Basex{
         depth.depth.bids = result.data.bids;
     }
 
+    async __getPrivateWebSocketUri(){
+        //binance doesn't support snapshot for account, so fetch balance first
+        const result = await this.#fetch('/api/v3/account', {}, {auth:'USER_DATA'});
+        if(result.code === 0){
+            this.__account.commissionRates = {...result.data.commissionRates};
+            for(const asset of result.data.balances){
+                this.__account.balances[asset['asset']] = {asset:asset['asset'],free:asset.free, locked:asset.locked};
+            }
+            this.__account.updateTime = Date.now();
+        }
+        const key = await this.#getListenKey();
+        this.listenKey.key = key;
+        this.listenKey.updateTime = Date.now();
+        return '?streams='+key;
+    }
     /**
      * @inheritDoc
      * @protected
      */
     async __onOpenWebSocket(ws){
         if([5,10,20].indexOf(this.opt.depthLimit) === -1) return false;
-        this.__ws.id = 1;
+        this.__wsPublic.id = 1;
         const params = [];
         for(const symbol in this.__depths){
             const depth = this.__depths[symbol];
@@ -65,7 +81,7 @@ class Binance extends Basex{
             params.push(s.exSymbol.toLowerCase()+'@depth'+this.opt.depthLimit+'@100ms');
         }
         this.log(`Subscribe ${JSON.stringify(params)}`);
-        ws.send(JSON.stringify({method:'SUBSCRIBE', params, id:this.__ws.id++}));
+        ws.send(JSON.stringify({method:'SUBSCRIBE', params, id:this.__wsPublic.id++}));
         return true;
     }
     /**
@@ -74,43 +90,65 @@ class Binance extends Basex{
      */
     async __onMessageWebSocket(ws, message){
         const data = JSON.parse(message.toString());
-        if(data.stream){
+        if(data.stream === this.listenKey.key){
+            if(data.data.e === 'outboundAccountPosition'){
+                const assets = [];
+                for(const asset of data.data['B']){
+                    const u = {asset:asset['a'],free:asset['f'], locked:asset['l']};
+                    assets.push(u);
+                    this.__account.balances[asset['a']] = u;
+                }
+                return assets;
+            }
+            if(data.data.e === 'executionReport'){
+                const o = data.data;
+                return {symbol:o.s, clientId:o.c, side:o.S, type:o.o, timeInForce:o.f, quantity:o.q, price:o.p,
+                    quoteQty:o.Q, orderId:o.i, executedQty:o.z, cumulativeQuoteQty:o.Z, status:o.X};
+            }
+        }else if(data.stream.indexOf('@depth') > -1){
             const stream = data.stream.split('@');
             const s = this.__getSymbolByEx(stream[0].toUpperCase());
             const depth = this.__depths[s.symbol];
             depth.updateTime = Date.now();
             depth.depth.asks = data.data.asks;
             depth.depth.bids = data.data.bids;
-            if(this.__events['updateDepth']){
-                this.__events['updateDepth'](s.symbol, depth);
-            }
+            return {symbol:s.symbol, depth};
+        }else{
+            this.error(`Unknown stream has receive ${message.toString()}`);
         }
     }
 
     /**
      * @protected
      * @param symbol
-     * @returns {Promise<void>}
+     * @returns {Promise<boolean>}
      */
     async __subscribeDepth(symbol){
         const s = this.__symbols.symbols[symbol];
         const param = s.exSymbol.toLowerCase()+'@depth'+this.opt.depthLimit+'@100ms';
         this.log(`Subscribe ["${param}"]`);
-        this.__ws.send(JSON.stringify({method:'SUBSCRIBE', params:[param], id:this.__ws.id++}));
+        this.__wsPublic.send(JSON.stringify({method:'SUBSCRIBE', params:[param], id:this.__wsPublic.id++}));
+        return true;
     }
-    async #fetch(uri, query, auth = false){
-        let queryString = auth?'timestamp='+Date.now():'';
+    async #fetch(uri, query, option = {}){
+        let queryString = '';
         for(const key in query){
-            queryString += '&'+key+'='+encodeURIComponent(query[key]);
+            queryString += (queryString?'&':'')+key+'='+encodeURIComponent(query[key]);
         }
-        const option = {};
-        if(auth) {
-            queryString += '&signature=' + crypto.createHmac('sha256', this.opt['secret']).update(queryString).digest('hex');
-            option['headers'] = {'X-MBX-APIKEY': this.opt['access']};
+        if(option.auth) {
+            if(!this.opt['auth']){
+                this.error(`No specification access&secret for request`);
+                return {code:-1, msg:'No access&secret'};
+            }
+            option['headers'] = {'X-MBX-APIKEY': this.opt['auth']['access']};
+            if(['TRADE', 'MARGIN', 'USER_DATA'].indexOf(option.auth) > -1) {
+                queryString += (queryString?'&':'')+'timestamp='+Date.now();
+                queryString += '&signature=' + crypto.createHmac('sha256', this.opt['auth']['secret']).update(queryString).digest('hex');
+            }
         }
         const url = uri + (queryString?'?'+queryString:'');
         const result = await super.__fetch(url, option);
-        if(result.code){
+        if(result.code !== 0){
             this.log(option);
             this.error(`${option.method??'GET'} ${this.opt.httpHost+url} fail:${JSON.stringify(result)}`);
         }
@@ -119,6 +157,10 @@ class Binance extends Basex{
     static #toSymbol(symbol){
         const s = symbol.toUpperCase().split('-');
         return s[0]+s[1];
+    }
+    async #getListenKey(expand = false){
+        const result = await this.#fetch('/api/v3/userDataStream', {}, {auth:'USER_STREAM', method:expand?'PUT':'POST'});
+        return result.data?.['listenKey'];
     }
 }
 

@@ -26,17 +26,19 @@ class Basex{
          * @private
          */
         this.name = this.constructor.name;
-        this.__enable = {depthWss:true};
+        this.__enable = {depthWss:true, accountWss:true};
         this.__symbols = {updateTime:0, symbols:{}};
         this.__depths = {};
-        this.__ws = null;
+        this.__wsPublic = null;
+        this.__wsPrivate = null;
         this.__events = {};
         this.__syncing = false;
+        this.__account = {refresh:'wss', updateTime:0, balances:{}};
     }
 
     /**
      * register an event on callback
-     * @param {("updateDepth")} event - event
+     * @param {("depth"|"balance"|"order")} event - event
      * @param {function} func - callback function
      * @public
      */
@@ -105,13 +107,38 @@ class Basex{
         }
         if(!this.__depths[s.symbol]) this.__depths[s.symbol] = {refresh:'wss', updateTime:0, depth:{asks:[], bids:[]}};
         this.__depths[s.symbol].refresh = 'wss';
-        if(!this.__ws){
+        if(!this.__wsPublic){
             await this.__startWebSocket();
             return true;
         }
-        await this.__subscribeDepth(s.symbol);
+        return await this.__subscribeDepth(s.symbol);
     }
 
+    /**
+     * subscribe account information by websocket
+     * @returns {Promise<boolean>}
+     */
+    async subscribeAccount(){
+        if(!this.__enable.accountWss){
+            this.error(`Not support Account on WebSocket`);
+            return false;
+        }
+        this.__account.refresh = 'wss';
+        if(!this.__wsPrivate){
+            await this.__startPrivateWebSocket();
+            return true;
+        }
+    }
+
+    /**
+     * query an or all assets balances
+     * @param asset
+     * @returns {Promise<{}|*>}
+     */
+    async queryAssets(asset){
+        if(!asset) return this.__account.balances;
+        return this.__account.balances[asset];
+    }
     /**
      * destroy by test, programmer don't need call it
      * @public
@@ -119,7 +146,7 @@ class Basex{
     destroy(){
         this.log(`Destroy`);
         this.__syncing = false;
-        this.__ws.close();
+        this.__wsPublic.close();
     }
 
     /**
@@ -171,6 +198,9 @@ class Basex{
             const response = await fetch(url, option);
             this.log(`${option.method} ${url} ${response.statusText} #${response.status}`);
             text = await response.text();
+            if(response.status >= 400){
+                return {code:-1, msg:text};
+            }
             if(response.headers.get('content-type').indexOf('application/json') > -1){
                 return {code:0, data:JSON.parse(text)}
             }
@@ -222,13 +252,20 @@ class Basex{
      * @abstract
      * @protected
      * @param {string} symbol - BTC-USDT etc.
+     * @returns {Promise<boolean>}
      */
     async __subscribeDepth(symbol){throw 'No implement function'}
     /**
      * @abstract
+     * @protected
+     * @returns {Promise<string>}
+     */
+    async __getPrivateWebSocketUri(){throw 'No implement function'}
+    /**
+     * @abstract
      * @param {WebSocket} ws
      * @param {Buffer} message
-     * @returns {Promise<void>}
+     * @returns {Promise<object>}
      * @protected
      */
     async __onMessageWebSocket(ws, message){throw 'No implement function'}
@@ -241,7 +278,7 @@ class Basex{
     async __startWebSocket(){
         const url = this.opt.wssHost;
         const ws = new WebSocket(url);
-        this.__ws = ws;
+        this.__wsPublic = ws;
         this.__syncing = true;
         this.log(`Connecting to ${url}...`);
         let self = this;
@@ -251,7 +288,7 @@ class Basex{
         ws.on('close', ()=>{
             self.log(`Closed connection by ${self.__syncing?'peer':'manual'}`);
             ws.removeAllListeners();
-            self.__ws = null;
+            self.__wsPublic = null;
             if(self.__syncing) {
                 setTimeout(() => {
                     self.__startWebSocket();
@@ -260,7 +297,10 @@ class Basex{
             }
         });
         ws.on('message', async (message)=>{
-            await self.__onMessageWebSocket(ws, message);
+            const result = await self.__onMessageWebSocket(ws, message);
+            if(result && this.__events['depth']){
+                this.__events['depth'](result.symbol, result.depth);
+            }
         });
         return new Promise(resolve=> {
             ws.on('open', async ()=>{
@@ -271,6 +311,36 @@ class Basex{
                 }
                 resolve();
             })
+        });
+    }
+    async __startPrivateWebSocket(){
+        const url = this.opt.wssHost+await this.__getPrivateWebSocketUri();
+        const ws = new WebSocket(url);
+        this.__wsPrivate = ws;
+        let self = this;
+        ws.on('error', (err)=>{
+            self.error(`${self.name} WebSocket private-connection has error:${err.toString()}`);
+        });
+        ws.on('close', ()=>{
+            ws.removeAllListeners();
+            self.__wsPrivate = null;
+            setTimeout(()=>{
+                self.__startPrivateWebSocket();
+                self = null;
+            }, 1000);
+        });
+        ws.on('message', async (message)=>{
+            const result = await self.__onMessageWebSocket(ws, message);
+            if(!result) return;
+            if(Array.isArray(result)){
+                if(this.__events['balance']){
+                    this.__events['balance'](result);
+                }
+                return;
+            }
+            if(this.__events['order']){
+                this.__events['order'](result);
+            }
         });
     }
 }
