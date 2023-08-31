@@ -33,4 +33,7 @@ describe('TEST:Binance', function (){
         await bn.subscribeAccount();
         console.log(await bn.queryAssets('USDT'));
     });
+    it('placeOrder', async ()=>{
+        await bn.placeOrder({})
+    })
 })

@@ -56,10 +56,11 @@ class Basex{
      * get depth by baseAsset and quoteAsset
      * @param {string} baseAsset - BTC etc.
      * @param {string} quoteAsset - USDT etc.
+     * @param {number} limit - order-book number of asks and bids on side
      * @returns {Promise<depth>}
      * @public
      */
-    async queryDepth(baseAsset, quoteAsset){
+    async queryDepth(baseAsset, quoteAsset, limit = 20){
         baseAsset = baseAsset.toUpperCase();
         quoteAsset = quoteAsset.toUpperCase();
         if(!await this.querySymbols(baseAsset, quoteAsset)) return null;
@@ -139,6 +140,35 @@ class Basex{
         if(!asset) return this.__account.balances;
         return this.__account.balances[asset];
     }
+    async withdraw(coin, network, address, memo, amount,clientId){}
+    async queryWithdraw(txId, clientId){}
+    async queryDeposit(coin, network, hash){}
+    async transferToSub(coin, amount, subAccount){}
+    async transferFromSub(coin, amount, subAccount){}
+    async queryAddress(coin, network){}
+    async queryBalances(){}
+
+    /**
+     * @typedef Order
+     * @property {string} base - baseAsset BTC etc.
+     * @property {string} quote - quoteAsset USDT etc.
+     * @property {"LIMIT"|"MARKET"} type - order type
+     * @property {"BUY"|"SELL"} side - order side
+     * @property {"GTC"|"IOC"} [timeInForce] - market order no need
+     * @property {number|string} [quantity] - the quantity of base-asset, market buy order no
+     * @property {number|string} [quoteQty] - the quantity of quote-asset, only on market buy
+     * @property {string} [cid] - the client unique id, alphabet and number
+     *
+     */
+    /**
+     * @abstract
+     * @param {Order} order
+     * @returns {Promise<void>}
+     */
+    async placeOrder(order){}
+    async queryOpenOrders(base, quote){}
+    async cancelOrder(base, quote, orderId){}
+
     /**
      * destroy by test, programmer don't need call it
      * @public

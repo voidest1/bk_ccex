@@ -23,6 +23,22 @@ class Binance extends Basex{
         super(option);
         this.listenKey = {key:'', updateTime:0};
     }
+    async placeOrder(order){
+        const query = {
+            symbol: order.base+order.quote,
+            side:order.side.toUpperCase(),
+            type:order.type.toUpperCase(),
+            timeInForce: 'GTC',
+            quantity:order.quantity,
+            price:order.price,
+            newClientOrderId:order.cid
+        }
+        const result = await this.#fetch('/api/v3/order', query, {auth:'USER_DATA',method:'POST'});
+        if(result.code){
+            return {code:-1, msg:JSON.stringify(result)};
+        }
+        return {code:0, msg:'', data:{orderId:result.orderId, cid:order.cid}};
+    }
     /**
      * @inheritDoc
      * @protected
